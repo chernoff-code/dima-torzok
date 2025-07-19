@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+
+  traefik:
+    image: traefik:v2.10
+    command:
+      - --configFile=/etc/traefik/traefik.yml
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml
+    container_name: ibretranslate-traefik
+
+  libretranslate:
+    build:
+      context: ./LibreTranslate
+    environment:
+      - LT_REQUIRE_APIKEY=false
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.translate.rule=Host(`translate.localhost`)"
+      - "traefik.http.routers.translate.entrypoints=web"
+      - "traefik.http.services.translate.loadbalancer.server.port=5000"
+    container_name: libretranslate-ubuntu
+
+networks:
+  default:
+    name: libretranslate-net
