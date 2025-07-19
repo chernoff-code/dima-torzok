@@ -1,5 +1,5 @@
 import logging
-import requests
+import subprocess
 import threading
 import json
 import sys
@@ -11,6 +11,7 @@ def translate_text_local(text: str) -> str:
     Translate a given text from Russian to English using local LibreTranslate API.
     Fallbacks to first alternative if direct translation is missing.
     """
+    import urllib.parse
     url = "http://translate.localhost/translate"
     data = {
         "q": text,
@@ -20,9 +21,18 @@ def translate_text_local(text: str) -> str:
         "alternatives": 1
     }
     try:
-        response = requests.post(url, data=data, timeout=10)
-        response.raise_for_status()
-        parsed = response.json()
+        encoded_data = urllib.parse.urlencode(data)
+        curl_cmd = [
+            "curl", "-s",
+            "-X", "POST", url,
+            "-H", "accept: application/json",
+            "-H", "Content-Type: application/x-www-form-urlencoded",
+            "-d", encoded_data
+        ]
+        result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=10)
+        result.check_returncode()
+        response = result.stdout
+        parsed = json.loads(response)
         if "translatedText" in parsed:
             return parsed["translatedText"]
         elif "alternatives" in parsed and parsed["alternatives"]:
@@ -32,8 +42,8 @@ def translate_text_local(text: str) -> str:
             return ""
     except Exception as e:
         logging.error(f"LibreTranslate error: {e}")
-        if 'response' in locals():
-            logging.error(f"Raw response: {response.text}")
+        if 'result' in locals():
+            logging.error(f"Raw response: {result.stdout}")
         return ""
 
 def spin_earth(stop_event):

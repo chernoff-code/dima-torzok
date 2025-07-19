@@ -6,7 +6,7 @@ import os
 
 def start_libretranslate_stack():
     """
-    Запускает LibreTranslate и Traefik через docker-compose, если они ещё не запущены.
+    Запускает LibreTranslate и Traefик через docker-compose, если они ещё не запущены.
     """
     compose_dir = os.path.join(os.path.dirname(__file__), 'libretranslate-stack')
     try:
@@ -22,10 +22,15 @@ def is_libretranslate_running() -> bool:
     """
     Проверяет, доступен ли сервис LibreTranslate по адресу http://translate.localhost/translate
     """
-    import requests
+    import subprocess
     try:
-        resp = requests.post("http://translate.localhost/translate", timeout=2)
-        return resp.status_code in (200, 400)  # 400 если не передан текст
+        result = subprocess.run([
+            'curl', '-s', '-o', '/dev/null', '-w', '%{http_code}',
+            '-X', 'POST', 'http://translate.localhost/translate',
+            '--max-time', '2'
+        ], capture_output=True, text=True, check=True)
+        code = result.stdout.strip()
+        return code in ("200", "400")
     except Exception:
         return False
 
