@@ -5,6 +5,7 @@ from segment_stack import stack_repeated_segments
 from translate_utils import translate_segments
 from visual_log import show_progress_block, show_stage_complete
 from start_libretranslate import ensure_libretranslate
+from subtitle_io import write_srt
 
 import whisper
 import argparse
@@ -14,12 +15,17 @@ from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 
+session_dir = None
+
 def get_session_dir() -> str:
-    session = datetime.now().strftime("sessions/%Y-%m-%d_%H-%M-%S")
-    os.makedirs(session, exist_ok=True)
-    return session
+    global session_dir
+    if session_dir is None:
+        session_dir = datetime.now().strftime("sessions/%Y-%m-%d_%H-%M-%S")
+        os.makedirs(session_dir, exist_ok=True)
+    return session_dir
 
 def main():
+    global session_dir
     parser = argparse.ArgumentParser(description="WhisperTorzokRefined v1.3.1")
     parser.add_argument("audio_path", help="Path to input audio")
     parser.add_argument("--model", default="large", help="Whisper model (base, small, medium, large)")
@@ -28,12 +34,13 @@ def main():
 
     ensure_libretranslate()  # Проверка и запуск LibreTranslate перед началом пайплайна
     try:
+        session_dir = get_session_dir()  # фиксируем имя папки в начале
         # 🔊 Этап 1: Предобработка аудио
         show_progress_block("🧼 Audio preprocessing...", 100, {
             "speed": "simulated 120x",
             "bitrate": "1411kbit/s"
         })
-        cleaned_audio = preprocess_audio(args.audio_path)
+        cleaned_audio = preprocess_audio(args.audio_path, session_dir)
         show_stage_complete("✅ Preprocessing complete.")
 
         # 🔄 Этап 2: Загрузка модели
@@ -62,10 +69,8 @@ def main():
 
         # 📜 Этап 4: Фильтрация и стакание
         hallucinations = load_hallucination_markers(args.hallucination_file)
-        segments = process_segments(segments, hallucination_markers=hallucinations)
+        segments = process_segments(segments, session_dir, hallucination_markers=hallucinations)
         segments = stack_repeated_segments(segments)
-
-        session_dir = get_session_dir()
 
         print("\n📜 Writing Russian subtitles...")
         write_srt(os.path.join(session_dir, "output_ru.srt"), segments)
