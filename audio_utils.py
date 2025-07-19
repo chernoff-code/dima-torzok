@@ -4,9 +4,22 @@ import shutil
 import librosa
 import soundfile as sf
 import noisereduce as nr
+import os
+from datetime import datetime
 from typing import Optional
 
-def preprocess_audio(input_path: str, intermediate_path: str = "cleaned.wav", final_path: str = "denoised.wav") -> str:
+def get_session_dir() -> str:
+    session = datetime.now().strftime("sessions/%Y-%m-%d_%H-%M-%S")
+    os.makedirs(session, exist_ok=True)
+    return session
+
+def preprocess_audio(input_path: str, intermediate_path: str = None, final_path: str = None) -> str:
+    session_dir = get_session_dir() if intermediate_path is None or final_path is None else os.path.dirname(intermediate_path)
+    if not intermediate_path:
+        intermediate_path = os.path.join(session_dir, "cleaned.wav")
+    if not final_path:
+        final_path = os.path.join(session_dir, "denoised.wav")
+
     """
     Clean audio using FFmpeg filters + denoise with noisereduce.
     Returns path to final cleaned file.
