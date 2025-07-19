@@ -1,0 +1,6 @@
+librosa
+soundfile
+noisereduce
+whisper
+requests
+pytest

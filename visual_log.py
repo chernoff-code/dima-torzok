@@ -1,7 +1,9 @@
+import logging
 import sys
 import time
+from typing import Optional, Dict
 
-def render_progress_bar(percent, width=50, char_full="■", char_empty=" "):
+def render_progress_bar(percent: int, width: int = 50, char_full: str = "■", char_empty: str = " ") -> str:
     """
     Generates a string-based progress bar.
     """
@@ -9,7 +11,7 @@ def render_progress_bar(percent, width=50, char_full="■", char_empty=" "):
     empty = width - filled
     return f"[{char_full * filled}{char_empty * empty}] {percent}%"
 
-def show_progress_block(title, percent, params=None, delay=0.01):
+def show_progress_block(title: str, percent: int, params: Optional[Dict] = None, delay: float = 0.01):
     """
     Renders styled progress line with optional parameters.
     """
@@ -25,5 +27,5 @@ def show_progress_block(title, percent, params=None, delay=0.01):
         time.sleep(delay)
     print()
 
-def show_stage_complete(message="✅ Stage complete."):
+def show_stage_complete(message: str = "✅ Stage complete."):
     print(message)

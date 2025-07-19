@@ -1,4 +1,6 @@
-def stack_repeated_segments(segments, phrase_repeat_threshold=5):
+from typing import List, Dict, Any
+
+def stack_repeated_segments(segments: List[Dict[str, Any]], phrase_repeat_threshold: int = 5) -> List[Dict[str, Any]]:
     """
     Group consecutive segments with identical text into one block.
     Only applies if repetitions reach the threshold (default 5).

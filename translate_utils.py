@@ -1,11 +1,12 @@
-import subprocess
+import logging
+import requests
 import threading
-import urllib.parse
 import json
 import sys
 import itertools
+from typing import List, Dict, Any
 
-def translate_text_local(text):
+def translate_text_local(text: str) -> str:
     """
     Translate a given text from Russian to English using local LibreTranslate API.
     Fallbacks to first alternative if direct translation is missing.
@@ -18,32 +19,21 @@ def translate_text_local(text):
         "format": "text",
         "alternatives": 1
     }
-
     try:
-        encoded_data = urllib.parse.urlencode(data)
-        curl_cmd = [
-            "curl", "-s",
-            "-X", "POST", url,
-            "-H", "accept: application/json",
-            "-H", "Content-Type: application/x-www-form-urlencoded",
-            "-d", encoded_data
-        ]
-        result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=10)
-        result.check_returncode()
-        response = result.stdout
-        parsed = json.loads(response)
-
+        response = requests.post(url, data=data, timeout=10)
+        response.raise_for_status()
+        parsed = response.json()
         if "translatedText" in parsed:
             return parsed["translatedText"]
         elif "alternatives" in parsed and parsed["alternatives"]:
             return parsed["alternatives"][0]
         else:
-            print(f"ℹ️ Unexpected response keys: {list(parsed.keys())}")
+            logging.warning(f"Unexpected response keys: {list(parsed.keys())}")
             return ""
     except Exception as e:
-        print(f"\n⚠️ LibreTranslate error: {e}")
-        if 'result' in locals():
-            print(f"🔍 Raw response: {result.stdout}")
+        logging.error(f"LibreTranslate error: {e}")
+        if 'response' in locals():
+            logging.error(f"Raw response: {response.text}")
         return ""
 
 def spin_earth(stop_event):
@@ -57,7 +47,7 @@ def spin_earth(stop_event):
         stop_event.wait(0.3)
     print("\r✅ Translation complete.         ")
 
-def translate_segments(segments):
+def translate_segments(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Translate list of segments and show a spinner while working.
     Returns list of translated subtitle blocks.

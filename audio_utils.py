@@ -1,11 +1,12 @@
+import logging
 import subprocess
 import shutil
 import librosa
 import soundfile as sf
 import noisereduce as nr
-import sys
+from typing import Optional
 
-def preprocess_audio(input_path, intermediate_path="cleaned.wav", final_path="denoised.wav"):
+def preprocess_audio(input_path: str, intermediate_path: str = "cleaned.wav", final_path: str = "denoised.wav") -> str:
     """
     Clean audio using FFmpeg filters + denoise with noisereduce.
     Returns path to final cleaned file.
@@ -13,8 +14,8 @@ def preprocess_audio(input_path, intermediate_path="cleaned.wav", final_path="de
 
     # 🧰 Проверяем наличие ffmpeg
     if not shutil.which("ffmpeg"):
-        print("❌ FFmpeg is not installed or not in PATH.")
-        sys.exit(1)
+        logging.error("FFmpeg is not installed or not in PATH.")
+        raise RuntimeError("FFmpeg is not installed or not in PATH.")
 
     # 🎧 Применяем аудиофильтры: обрезаем низкие/высокие частоты, нормализуем, подавляем шум
     filters = "highpass=f=200, lowpass=f=3000, afftdn, dynaudnorm"
@@ -26,8 +27,8 @@ def preprocess_audio(input_path, intermediate_path="cleaned.wav", final_path="de
             check=True
         )
     except Exception as e:
-        print(f"⚠️ FFmpeg failed: {e}")
-        sys.exit(1)
+        logging.error(f"FFmpeg failed: {e}")
+        raise
 
     # 🔕 Шумоподавление
     try:
@@ -35,7 +36,7 @@ def preprocess_audio(input_path, intermediate_path="cleaned.wav", final_path="de
         y_denoised = nr.reduce_noise(y=y, sr=sr)
         sf.write(final_path, y_denoised, sr)
     except Exception as e:
-        print(f"⚠️ Denoising failed: {e}")
-        sys.exit(1)
+        logging.error(f"Denoising failed: {e}")
+        raise
 
     return final_path
