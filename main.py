@@ -5,7 +5,7 @@ from segment_stack import stack_repeated_segments
 from translate_utils import translate_segments
 from visual_log import show_progress_block, show_stage_complete
 from start_libretranslate import ensure_libretranslate
-from subtitle_io import write_srt
+from subtitle_io import write_srt, split_long_segments
 
 import whisper
 import argparse
@@ -71,6 +71,7 @@ def main():
         hallucinations = load_hallucination_markers(args.hallucination_file)
         segments = process_segments(segments, session_dir, hallucination_markers=hallucinations)
         segments = stack_repeated_segments(segments)
+        segments = split_long_segments(segments, max_chars=80)
 
         print("\n📜 Writing Russian subtitles...")
         write_srt(os.path.join(session_dir, "output_ru.srt"), segments)
