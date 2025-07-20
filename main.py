@@ -11,25 +11,30 @@ import time
 import os
 from datetime import datetime
 
-def get_session_dir():
-    session = datetime.now().strftime("sessions/%Y-%m-%d_%H-%M-%S")
+def get_session_dir(audio_path, dt=None):
+    base = os.path.splitext(os.path.basename(audio_path))[0]
+    if dt is None:
+        dt = datetime.now()
+    session = f"sessions/{base}_" + dt.strftime("%Y-%m-%d_%H-%M-%S")
     os.makedirs(session, exist_ok=True)
     return session
 
 def main():
-    parser = argparse.ArgumentParser(description="WhisperTorzokRefined v1.3.1")
-    parser.add_argument("audio_path", help="Path to input audio")
-    parser.add_argument("--model", default="large", help="Whisper model (base, small, medium, large)")
+    parser = argparse.ArgumentParser(description="DimaTorzok v1.0.0 - Russian Audio Transcription and Translation")
+    parser.add_argument("file_path", help="Path to input media file")
+    parser.add_argument("--model", default="large", help="Whisper model (base, small, medium, turbo, large)")
     parser.add_argument("--hallucination-file", help="Path to hallucination phrases file")
     args = parser.parse_args()
 
+    # фиксируем время запуска один раз
+    session_dir = get_session_dir(args.file_path)
+
     # 🔊 Этап 1: Предобработка аудио
-    session_dir = get_session_dir()  # фиксируем имя папки в начале
     show_progress_block("🧼 Audio preprocessing...", 100, {
         "speed": "simulated 120x",
         "bitrate": "1411kbit/s"
     })
-    cleaned_audio = preprocess_audio(args.audio_path, session_dir=session_dir)
+    cleaned_audio = preprocess_audio(args.file_path, session_dir=session_dir)
     show_stage_complete("✅ Preprocessing complete.")
 
     # 🔄 Этап 2: Загрузка модели
@@ -57,7 +62,6 @@ def main():
     show_stage_complete("✅ Transcription finished.")
 
     # 📜 Этап 4: Фильтрация и стакание
-    session_dir = get_session_dir()  # фиксируем имя папки в начале
     hallucinations = load_hallucination_markers(args.hallucination_file)
     segments = process_segments(segments, session_dir, hallucination_markers=hallucinations)
     segments = stack_repeated_segments(segments)
