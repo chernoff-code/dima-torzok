@@ -1,15 +1,40 @@
+
+import sys
+import os
+from datetime import datetime
+
+# --- Перенаправление stderr Vosk в файл до любых импортов vosk/diarization_utils ---
+def _setup_vosk_log():
+    import os as _os
+    import sys as _sys
+    from datetime import datetime as _dt
+    # Определяем временный session_dir для логов, если не знаем путь к аудио
+    base = "vosklog"
+    dt = _dt.now()
+    session = f"sessions/{base}_" + dt.strftime("%Y-%m-%d_%H-%M-%S")
+    _os.makedirs(session, exist_ok=True)
+    vosk_log_path = _os.path.join(session, "vosk.log")
+    vosk_log_file = open(vosk_log_path, "w", encoding="utf-8")
+    _sys._vosk_log_file = vosk_log_file
+    _sys._vosk_log_path = vosk_log_path
+    _sys._vosk_session_dir = session
+    _sys._old_stderr = _sys.stderr
+    _sys.stderr = vosk_log_file
+_setup_vosk_log()
+
 from audio_utils import preprocess_audio
 from segment_filter import process_segments, load_hallucination_markers
 from segment_stack import stack_repeated_segments
 from subtitle_io import write_srt
 from translate_utils import translate_segments
 from visual_log import show_progress_block, show_stage_complete
+from diarization_utils import diarize_audio_vosk, assign_speakers_to_segments
+import urllib.request
+import tarfile
 
 import whisper
 import argparse
 import time
-import os
-from datetime import datetime
 
 def get_session_dir(audio_path, dt=None):
     base = os.path.splitext(os.path.basename(audio_path))[0]
@@ -19,7 +44,29 @@ def get_session_dir(audio_path, dt=None):
     os.makedirs(session, exist_ok=True)
     return session
 
+def download_and_extract(url, dest_dir):
+    import os
+    import shutil
+    import zipfile
+    filename = url.split('/')[-1]
+    archive_path = os.path.join(dest_dir, filename)
+    if not os.path.exists(dest_dir):
+        os.makedirs(dest_dir)
+    if not os.path.exists(archive_path):
+        print(f"Downloading {filename}...")
+        urllib.request.urlretrieve(url, archive_path)
+    print(f"Extracting {filename}...")
+    if filename.endswith('.zip'):
+        with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+            zip_ref.extractall(dest_dir)
+    else:
+        with tarfile.open(archive_path, 'r:*') as tar:
+            tar.extractall(dest_dir)
+    # Remove archive after extraction
+    os.remove(archive_path)
+
 def main():
+    import sys
     parser = argparse.ArgumentParser(description="DimaTorzok v1.0.0 - Russian Audio Transcription and Translation")
     parser.add_argument("file_path", help="Path to input media file")
     parser.add_argument("--model", default="large", help="Whisper model (base, small, medium, turbo, large)")
@@ -28,6 +75,25 @@ def main():
 
     # фиксируем время запуска один раз
     session_dir = get_session_dir(args.file_path)
+    # Переносим vosk.log в session_dir, если нужно
+    if hasattr(sys, "_vosk_log_file"):
+        sys._vosk_log_file.close()
+        import shutil
+        vosk_log_path = os.path.join(session_dir, "vosk.log")
+        shutil.move(sys._vosk_log_path, vosk_log_path)
+        sys._vosk_log_file = open(vosk_log_path, "a", encoding="utf-8")
+        sys.stderr = sys._vosk_log_file
+        sys._vosk_log_path = vosk_log_path
+
+    # Проверяем и скачиваем Vosk модели при необходимости
+    vosk_model_url = "https://alphacephei.com/vosk/models/vosk-model-ru-0.22.zip"
+    vosk_spk_url = "https://alphacephei.com/vosk/models/vosk-model-spk-0.4.zip"
+    vosk_model_dir = "vosk-model-ru-0.22"
+    vosk_spk_dir = "vosk-model-spk-0.4"
+    if not os.path.exists(vosk_model_dir):
+        download_and_extract(vosk_model_url, ".")
+    if not os.path.exists(vosk_spk_dir):
+        download_and_extract(vosk_spk_url, ".")
 
     # 🔊 Этап 1: Предобработка аудио
     show_progress_block("🧼 Audio preprocessing...", 100, {
@@ -38,11 +104,11 @@ def main():
     show_stage_complete("✅ Preprocessing complete.")
 
     # 🔄 Этап 2: Загрузка модели
-    print(f"\n🔄 Loading Whisper model: {args.model}")
+    print(f"🔄 Loading Whisper model: {args.model}")
     model = whisper.load_model(args.model)
 
-    # 🗣️ Этап 3: Транскрибирование
-    print("\n🗣️🤖 Transcribing audio...")
+    # 🗣️🤖 Этап 3: Транскрибирование
+    print("🗣️🤖 Transcribing audio...")
     start_time = time.time()
     result = model.transcribe(
         cleaned_audio,
@@ -54,8 +120,30 @@ def main():
     elapsed = time.time() - start_time
     segments = result["segments"]
     rate = round(len(segments) / elapsed, 2)
-
     show_progress_block("🗣️🤖 Transcribing audio...", 100, {
+        "segments": len(segments),
+        "rate": f"{rate} seg/s"
+    })
+
+    # Диаризация Vosk
+    show_progress_block("🔎 Running speaker diarization (Vosk)...", 30, {"stage": "diarization"})
+    try:
+        speaker_segments = diarize_audio_vosk(cleaned_audio, vosk_model_dir, vosk_spk_dir)
+        show_stage_complete("✅ Speaker diarization complete.")
+    except Exception as e:
+        print(f"[WARN] Speaker diarization failed: {e}")
+        speaker_segments = None
+    finally:
+        if hasattr(sys, "_old_stderr"):
+            sys.stderr = sys._old_stderr
+        if hasattr(sys, "_vosk_log_file"):
+            sys._vosk_log_file.close()
+
+    # Присваиваем спикеров сегментам, если удалось получить diarization
+    if speaker_segments:
+        segments = assign_speakers_to_segments(segments, speaker_segments)
+
+    show_progress_block("🗣️ 🤖 Transcribing audio...", 100, {
         "segments": len(segments),
         "rate": f"{rate} seg/s"
     })
@@ -66,13 +154,13 @@ def main():
     segments = process_segments(segments, session_dir, hallucination_markers=hallucinations)
     segments = stack_repeated_segments(segments)
 
-    print("\n📜 Writing Russian subtitles...")
+    print("📜 Writing Russian subtitles...")
     write_srt(os.path.join(session_dir, "output_ru.srt"), segments)
     print(f"📁 Saved: {os.path.join(session_dir, 'output_ru.srt')}")
     print(f"📁 Repetition log: {os.path.join(session_dir, 'repetitions.log')}")
 
     # 🌍 Этап 5: Перевод
-    print("\n🌍 Translating subtitles... [segments:", len(segments), "]")
+    print("🌍 Translating subtitles... [segments:", len(segments), "]")
     translated = translate_segments(segments)
     show_stage_complete("✅ Translation complete.")
     write_srt(os.path.join(session_dir, "output_en_translated.srt"), translated)
