@@ -3,4 +3,5 @@ soundfile
 noisereduce
 whisper
 requests
+vosk
 pytest

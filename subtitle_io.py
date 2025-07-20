@@ -66,14 +66,15 @@ def write_srt(filename, segments, width=80):
     Each segment includes a start/end timestamp and wrapped text.
     """
     segments = split_long_segments(segments, max_chars=width)
-    segments = remove_leading_dash(segments)
-    segments = remove_final_dot_if_single_sentence(segments)
     with open(filename, "w", encoding="utf-8") as srt:
         for i, seg in enumerate(segments, 1):
             start = format_timestamp(seg["start"])
             end = format_timestamp(seg["end"])
-            wrapped = textwrap.fill(seg["text"], width=width)
-            srt.write(f"{i}\n{start} --> {end}\n{wrapped}\n\n")
+            # 1. Удаляем все переносы строк внутри титра
+            text = seg["text"].replace("\n", " ").replace("\r", " ")
+            text = re.sub(r"\s+", " ", text).strip()
+            # 2. Не добавляем никаких искусственных переносов строк
+            srt.write(f"{i}\n{start} --> {end}\n{text}\n\n")
 
 def remove_leading_dash(segments):
     """

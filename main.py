@@ -4,28 +4,15 @@ import os
 from datetime import datetime
 
 # --- Перенаправление stderr Vosk в файл до любых импортов vosk/diarization_utils ---
-def _setup_vosk_log():
-    import os as _os
-    import sys as _sys
-    from datetime import datetime as _dt
-    # Определяем временный session_dir для логов, если не знаем путь к аудио
-    base = "vosklog"
-    dt = _dt.now()
-    session = f"sessions/{base}_" + dt.strftime("%Y-%m-%d_%H-%M-%S")
-    _os.makedirs(session, exist_ok=True)
-    vosk_log_path = _os.path.join(session, "vosk.log")
-    vosk_log_file = open(vosk_log_path, "w", encoding="utf-8")
-    _sys._vosk_log_file = vosk_log_file
-    _sys._vosk_log_path = vosk_log_path
-    _sys._vosk_session_dir = session
-    _sys._old_stderr = _sys.stderr
-    _sys.stderr = vosk_log_file
-_setup_vosk_log()
+
+# --- Перенаправление stderr Vosk в файл, но только после определения session_dir ---
+
 
 from audio_utils import preprocess_audio
 from segment_filter import process_segments, load_hallucination_markers
 from segment_stack import stack_repeated_segments
-from subtitle_io import write_srt
+from segment_post import merge_short_segments
+from subtitle_io import write_srt, remove_leading_dash, remove_final_dot_if_single_sentence
 from translate_utils import translate_segments
 from visual_log import show_progress_block, show_stage_complete
 from diarization_utils import diarize_audio_vosk, assign_speakers_to_segments
@@ -75,15 +62,11 @@ def main():
 
     # фиксируем время запуска один раз
     session_dir = get_session_dir(args.file_path)
-    # Переносим vosk.log в session_dir, если нужно
-    if hasattr(sys, "_vosk_log_file"):
-        sys._vosk_log_file.close()
-        import shutil
-        vosk_log_path = os.path.join(session_dir, "vosk.log")
-        shutil.move(sys._vosk_log_path, vosk_log_path)
-        sys._vosk_log_file = open(vosk_log_path, "a", encoding="utf-8")
-        sys.stderr = sys._vosk_log_file
-        sys._vosk_log_path = vosk_log_path
+    # Перенаправляем stderr Vosk сразу в нужный vosk.log
+    vosk_log_path = os.path.join(session_dir, "vosk.log")
+    vosk_log_file = open(vosk_log_path, "w", encoding="utf-8")
+    old_stderr = sys.stderr
+    sys.stderr = vosk_log_file
 
     # Проверяем и скачиваем Vosk модели при необходимости
     vosk_model_url = "https://alphacephei.com/vosk/models/vosk-model-ru-0.22.zip"
@@ -107,8 +90,8 @@ def main():
     print(f"🔄 Loading Whisper model: {args.model}")
     model = whisper.load_model(args.model)
 
-    # 🗣️🤖 Этап 3: Транскрибирование
-    print("🗣️🤖 Transcribing audio...")
+    # 🗣️ 🤖 Этап 3: Транскрибирование
+    print("🗣️ 🤖 Transcribing audio...")
     start_time = time.time()
     result = model.transcribe(
         cleaned_audio,
@@ -120,7 +103,7 @@ def main():
     elapsed = time.time() - start_time
     segments = result["segments"]
     rate = round(len(segments) / elapsed, 2)
-    show_progress_block("🗣️🤖 Transcribing audio...", 100, {
+    show_progress_block("🗣️ 🤖 Transcribing audio...", 100, {
         "segments": len(segments),
         "rate": f"{rate} seg/s"
     })
@@ -134,25 +117,24 @@ def main():
         print(f"[WARN] Speaker diarization failed: {e}")
         speaker_segments = None
     finally:
-        if hasattr(sys, "_old_stderr"):
-            sys.stderr = sys._old_stderr
-        if hasattr(sys, "_vosk_log_file"):
-            sys._vosk_log_file.close()
+        sys.stderr = old_stderr
+        vosk_log_file.close()
 
     # Присваиваем спикеров сегментам, если удалось получить diarization
     if speaker_segments:
         segments = assign_speakers_to_segments(segments, speaker_segments)
 
-    show_progress_block("🗣️ 🤖 Transcribing audio...", 100, {
-        "segments": len(segments),
-        "rate": f"{rate} seg/s"
-    })
     show_stage_complete("✅ Transcription finished.")
 
     # 📜 Этап 4: Фильтрация и стакание
     hallucinations = load_hallucination_markers(args.hallucination_file)
     segments = process_segments(segments, session_dir, hallucination_markers=hallucinations)
     segments = stack_repeated_segments(segments)
+    segments = merge_short_segments(segments, min_word_count=3, max_pause=1.0)
+
+    # Удаляем тире в начале и точку в конце только перед записью и переводом
+    segments = remove_leading_dash(segments)
+    segments = remove_final_dot_if_single_sentence(segments)
 
     print("📜 Writing Russian subtitles...")
     write_srt(os.path.join(session_dir, "output_ru.srt"), segments)
@@ -162,6 +144,8 @@ def main():
     # 🌍 Этап 5: Перевод
     print("🌍 Translating subtitles... [segments:", len(segments), "]")
     translated = translate_segments(segments)
+    translated = remove_leading_dash(translated)
+    translated = remove_final_dot_if_single_sentence(translated)
     show_stage_complete("✅ Translation complete.")
     write_srt(os.path.join(session_dir, "output_en_translated.srt"), translated)
     print(f"📁 Saved: {os.path.join(session_dir, 'output_en_translated.srt')}\n")
